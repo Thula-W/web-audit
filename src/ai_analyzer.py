@@ -4,6 +4,7 @@ import os
 import json
 import datetime
 from pathlib import Path
+from .prompts import ANALYSER_SYSTEM_PROMPT
 
 def analyze(metrics: dict) -> tuple:
     """
@@ -25,37 +26,12 @@ def analyze(metrics: dict) -> tuple:
     client = openai.OpenAI(api_key=api_key, http_client=http_client)
 
     user_prompt = f"Factual metrics extracted from the webpage:\n{json.dumps(metrics, indent=2)}"
-    system_prompt  = """You are a website auditor for a marketing agency specializing in SEO and conversion optimization.
 
-        Analyze the provided factual metrics from a single webpage and generate structured insights covering:
-        - SEO structure: Evaluate meta tags, headings hierarchy, and link structure quality.
-        - Messaging clarity: Assess content depth, readability, and clarity of value proposition.
-        - CTA usage: Review call-to-action elements, quantity, and effectiveness based on metrics.
-        - Content depth: Check word count, heading structure, and content organization.
-        - Obvious UX or structural concerns: Identify issues like missing alt text, poor heading hierarchy, or imbalanced links.
-
-        Requirements:
-        - Insights MUST be specific and grounded in the provided metrics.
-        - Reference actual numbers from the metrics in your analysis.
-        - Avoid generic statements.
-        - Recommendations MUST be actionable and tied to actual data points.
-
-        Output STRICTLY in valid JSON format:
-        {
-        "insights": {
-            "seo": '',
-            "messaging": '',
-            "cta": '',
-            "content":'',
-            "ux": ''
-        },
-        "recommendations": ["1. Actionable recommendation tied to metrics", "2. ...", ...]
-        }"""
     try:
         response = client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
-                {"role": "system", "content": system_prompt},
+                {"role": "system", "content": ANALYSER_SYSTEM_PROMPT},
                 {"role": "user", "content": user_prompt}
             ],
             temperature=0.5,
