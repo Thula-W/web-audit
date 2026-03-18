@@ -1,8 +1,83 @@
 import requests
 from bs4 import BeautifulSoup
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urljoin
 import re
 
+
+def extract_links(soup, base_url):
+    """
+    Robustly extracts and classifies unique internal and external links.
+    """
+    parsed_base = urlparse(base_url)
+    base_domain = parsed_base.netloc
+
+    # Using sets to ensure we only count UNIQUE destinations (SEO best practice)
+    internal_links = set()
+    external_links = set()
+
+    # 1. Capture all 'a' tags safely
+    for link in soup.find_all('a'):
+        # 2. Defensive check: safely get href without crashing if missing
+        href = link.get('href')
+        if not href:
+            continue
+            
+        href = href.strip()
+
+        # 3. Filter Noise: skip non-navigational protocols and UI fragments
+        if href.startswith(('mailto:', 'tel:', 'javascript:', '#')) or not href:
+            continue
+
+        # 4. Normalization: convert relative paths (/about) to absolute URLs
+        full_url = urljoin(base_url, href)
+        parsed_href = urlparse(full_url)
+        link_domain = parsed_href.netloc
+
+        # 5. Classification Logic: Handle subdomains (e.g., blog.example.com) as internal
+        if link_domain == base_domain or link_domain.endswith(f".{base_domain}"):
+            internal_links.add(full_url)
+        else:
+            external_links.add(full_url)
+
+    return {
+        "total_unique": len(internal_links) + len(external_links),
+        "internal_count": len(internal_links),
+        "external_count": len(external_links),
+    }
+
+def extract_ctas(soup):
+    cta_keywords = [
+        "buy", "sign up", "get started", "contact", "download",
+        "subscribe", "join", "start free", "book", "request",
+        "try", "learn more"
+    ]
+
+    def is_cta(tag):
+        text = tag.get_text(strip=True).lower()
+        classes = " ".join(tag.get("class", [])).lower()
+        aria = tag.get("aria-label", "").lower()
+
+        # Heuristic signals
+        keyword_match = any(k in text for k in cta_keywords)
+        class_signal = any(k in classes for k in ["btn", "cta", "primary", "action"])
+        aria_signal = any(k in aria for k in cta_keywords)
+
+        return keyword_match or class_signal or aria_signal
+
+    # Buttons + anchor tags
+    candidates = soup.find_all(['a', 'button'])
+
+    ctas = []
+    for tag in candidates:
+        if is_cta(tag):
+            text = tag.get_text(strip=True)
+            if text:  # avoid empty UI elements
+                ctas.append(text)
+
+    # Remove duplicates
+    ctas = list(set(ctas))
+
+    return ctas
 
 def get_metrics(url: str) -> dict:
     """
@@ -36,36 +111,8 @@ def get_metrics(url: str) -> dict:
         h1_texts = heading_texts('h1')
         h2_texts = heading_texts('h2')
         h3_texts = heading_texts('h3')
-        
-        # CTAs: approximate detection based on text patterns
-        cta_keywords = re.compile(
-            r'\b(buy|sign up|learn more|contact|call|download|get started|subscribe|click here|join|start free)\b',
-            re.I
-        )
-        links = soup.find_all('a')
-        buttons = soup.find_all('button')
-        ctas = []
-        for tag in links + buttons:
-            text_content = tag.get_text(strip=True)
-            if text_content and cta_keywords.search(text_content):
-                ctas.append(text_content)
-        
-        # Links: internal vs external (with text)
-        total_links = len(links)
-        parsed_url = urlparse(url)
-        domain = parsed_url.netloc
-        internal_links = []
-        external_links = []
-        for link in links:
-            href = link.get('href')
-            text_content = link.get_text(strip=True)
-            if not href:
-                continue
-            parsed_href = urlparse(href)
-            if parsed_href.netloc == domain or not parsed_href.netloc:
-                internal_links.append(text_content)
-            else:
-                external_links.append(text_content)
+
+        links = extract_links(soup, url)
         
         # Images and alt text
         images = soup.find_all('img')
@@ -83,6 +130,7 @@ def get_metrics(url: str) -> dict:
         meta_desc_tag = soup.find('meta', attrs={'name': 'description'})
         meta_desc = meta_desc_tag.get('content', '').strip() if meta_desc_tag else ''
         
+        ctas = extract_ctas(soup)
         return {
             'word_count': word_count,
             'headings': {
@@ -92,12 +140,11 @@ def get_metrics(url: str) -> dict:
             },
             'ctas': {
                 'count': len(ctas),
-                'items': ctas
             },
             'links': {
-                'total': total_links,
-                'internal': len(internal_links),
-                'external': len(external_links)
+                'total': links['total_unique'],
+                'internal': links['internal_count'],
+                'external': links['external_count'],
             },
             'images': {
                 'count': image_count,
