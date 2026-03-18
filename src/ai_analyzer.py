@@ -5,6 +5,7 @@ import json
 import datetime
 from pathlib import Path
 from .prompts import ANALYSER_SYSTEM_PROMPT
+from .helpers import safe_json_parse, validate_output
 
 def analyze(metrics: dict) -> tuple:
     """
@@ -17,6 +18,7 @@ def analyze(metrics: dict) -> tuple:
         Tuple of (insights dict, recommendations list, prompt_logs dict)
     """
     api_key = os.getenv('OPENAI_API_KEY')
+    MODEL = os.getenv('MODEL', 'gpt-4o-mini')
     if not api_key:
         raise Exception("OPENAI_API_KEY environment variable not set")
     
@@ -29,18 +31,20 @@ def analyze(metrics: dict) -> tuple:
 
     try:
         response = client.chat.completions.create(
-            model="gpt-4o-mini",
+            model= MODEL,
             messages=[
                 {"role": "system", "content": ANALYSER_SYSTEM_PROMPT},
                 {"role": "user", "content": user_prompt}
             ],
-            temperature=0.5,
-            max_tokens=1500
+            response_format={"type": "json_object"},
+            temperature=0.3,
+            max_tokens=1000
         )
         raw_output = response.choices[0].message.content
         
         # Parse JSON from response
-        result = json.loads(raw_output.strip())
+        result = safe_json_parse(raw_output.strip())
+        validate_output(result)
         insights = result.get('insights', {})
         recommendations = result.get('recommendations', [])
         
